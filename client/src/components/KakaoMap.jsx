@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const KAKAO_APPKEY = process.env.REACT_APP_KAKAO_APPKEY;
 
@@ -7,13 +7,13 @@ export default function KakaoMap() {
   const mapInstance = useRef(null);
   const markersRef = useRef([]);
 
-  const [filterMode, setFilterMode] = useState('under2km');
+  const [filterMode, setFilterMode] = useState("under2km");
   const [places, setPlaces] = useState([]);
   const [keyword, setKeyword] = useState("");
   const [isMapLoaded, setIsMapLoaded] = useState(false);
-  const [searchTrigger, setSearchTrigger] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchTrigger, setSearchTrigger] = useState(0);
 
-  // 지도 초기화
   useEffect(() => {
     const existingScript = document.querySelector('script[data-kakao="true"]');
 
@@ -27,10 +27,10 @@ export default function KakaoMap() {
           center: new window.kakao.maps.LatLng(HGU.lat, HGU.lng),
           level: 4,
         };
+
         const map = new window.kakao.maps.Map(container, options);
         mapInstance.current = map;
 
-        // 교내 식당 마커 (고정)
         const internalPlaces = [
           { name: "학생회관", lat: 36.10233564114472, lng: 129.38920392250336 },
           { name: "샐러디", lat: 36.102268625888804, lng: 129.39007897550985 },
@@ -79,13 +79,9 @@ export default function KakaoMap() {
     }
   }, []);
 
-
-
-  // 검색 로직 (필터나 키워드가 바뀌면 실행)
   useEffect(() => {
     if (!isMapLoaded || !mapInstance.current || !window.kakao.maps.services) return;
 
-    // 마커 표시 함수
     const displayMarker = (place) => {
       const marker = new window.kakao.maps.Marker({
         map: mapInstance.current,
@@ -94,13 +90,13 @@ export default function KakaoMap() {
       });
 
       const infowindow = new window.kakao.maps.InfoWindow({ zIndex: 1, removable: true });
-      window.kakao.maps.event.addListener(marker, 'click', function () {
+      window.kakao.maps.event.addListener(marker, "click", function () {
         infowindow.setContent(`
-            <div style="padding:10px;font-size:12px;min-width:150px;">
-                <strong style="color:#007bff;">${place.place_name}</strong><br/>
-                ${place.category_name.split('>').pop()}<br/>
-                <a href="${place.place_url}" target="_blank" style="color:blue">상세보기</a>
-            </div>
+          <div style="padding:10px;font-size:12px;min-width:150px;">
+            <strong style="color:#007bff;">${place.place_name}</strong><br/>
+            ${place.category_name.split(">").pop()}<br/>
+            <a href="${place.place_url}" target="_blank" style="color:blue">상세보기</a>
+          </div>
         `);
         infowindow.open(mapInstance.current, marker);
       });
@@ -111,96 +107,160 @@ export default function KakaoMap() {
     const ps = new window.kakao.maps.services.Places();
     const HGU = { lat: 36.1039, lng: 129.3883 };
 
-    // 이전 마커 지우기
-    markersRef.current.forEach(marker => marker.setMap(null));
+    markersRef.current.forEach((marker) => marker.setMap(null));
     markersRef.current = [];
+    setPlaces([]);
+    setSearching(true);
 
-    const searchRadius = filterMode === 'under2km' ? 2000 : 4000;
-    const searchOption = {
-      location: new window.kakao.maps.LatLng(HGU.lat, HGU.lng),
-      radius: searchRadius,
-      sort: window.kakao.maps.services.SortBy.DISTANCE,
+    const range = (() => {
+      if (filterMode === "under2km") return { min: 0, max: 2000 };
+      return { min: 2000, max: 4000 };
+    })();
+
+    const getDistance = (p) => {
+      const d = Number(p?.distance);
+      return Number.isFinite(d) ? d : null;
     };
 
-    const placesSearchCB = (data, status) => {
-      if (status === window.kakao.maps.services.Status.OK) {
-        let resultData = data;
+    const inRange = (p) => {
+      const d = getDistance(p);
+      if (d === null) return false;
+      return d > range.min && d <= range.max;
+    };
 
-        // 클라이언트 필터링 (2km~4km 인 경우)
-        if (filterMode === '2to4km') {
-          resultData = data.filter(place => parseInt(place.distance) > 2000);
-        }
+    const dedupeById = (arr) => {
+      const map = new Map();
+      for (const p of arr) {
+        const key = p?.id ?? `${p?.place_name}-${p?.x}-${p?.y}`;
+        if (!map.has(key)) map.set(key, p);
+      }
+      return Array.from(map.values());
+    };
 
-        setPlaces(resultData);
+    let accumulated = [];
 
-        // 지도에 마커 찍기
-        const newMarkers = resultData.map((place) => displayMarker(place));
-        markersRef.current = newMarkers;
+    const processAndDisplay = (allData) => {
+      const unique = dedupeById(allData);
+      const finalResults = unique.filter(inRange);
 
+      setPlaces(finalResults);
+      setSearching(false);
+
+      const bounds = new window.kakao.maps.LatLngBounds();
+      const newMarkers = finalResults.map((place) => {
+        const marker = displayMarker(place);
+        bounds.extend(new window.kakao.maps.LatLng(place.y, place.x));
+        return marker;
+      });
+      markersRef.current = newMarkers;
+
+      if (finalResults.length > 0) {
+        mapInstance.current.setBounds(bounds);
       } else {
-        setPlaces([]);
+        mapInstance.current.setCenter(new window.kakao.maps.LatLng(HGU.lat, HGU.lng));
       }
     };
 
-    // 검색 실행
-    if (keyword.trim()) {
-      ps.keywordSearch(keyword, placesSearchCB, searchOption);
-    } else {
-      ps.categorySearch('FD6', placesSearchCB, searchOption);
-    }
+    const searchCB = (data, status, pagination) => {
+      if (status === window.kakao.maps.services.Status.OK) {
+        accumulated = dedupeById([...accumulated, ...data]);
 
-  }, [isMapLoaded, filterMode, keyword, searchTrigger]); // searchTrigger가 바뀌면 검색 실행
+        const filteredNow = accumulated.filter(inRange);
+
+        if (filteredNow.length < 15 && pagination?.hasNextPage && pagination.current < 3) {
+          pagination.nextPage();
+          return;
+        }
+
+        processAndDisplay(accumulated);
+      } else {
+        if (accumulated.length > 0) processAndDisplay(accumulated);
+        else {
+          setPlaces([]);
+          setSearching(false);
+        }
+      }
+    };
+
+    const options = {
+      location: new window.kakao.maps.LatLng(HGU.lat, HGU.lng),
+      radius: filterMode === "under2km" ? 2000 : 4500,
+      sort: window.kakao.maps.services.SortBy.DISTANCE,
+    };
+
+    if (keyword.trim()) {
+      ps.keywordSearch(keyword, searchCB, options);
+    } else {
+      ps.categorySearch("FD6", searchCB, options);
+    }
+  }, [isMapLoaded, filterMode, keyword, searchTrigger]);
 
   const handleSearchClick = (e) => {
     e.preventDefault();
-    setSearchTrigger(prev => !prev); // 버튼 누르면 트리거 변경 -> useEffect 실행
+    setSearchTrigger((prev) => prev + 1);
   };
 
   const handleSearchKeyDown = (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       handleSearchClick(e);
     }
-  }
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: '#f8f9fc', padding: '15px', borderRadius: '12px' }}>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 'bold', fontSize: '14px', color: '#333' }}>거리 선택:</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+          background: "#f8f9fc",
+          padding: "15px",
+          borderRadius: "12px",
+        }}
+      >
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontWeight: "bold", fontSize: "14px", color: "#333" }}>거리 선택:</span>
 
           <button
-            onClick={() => setFilterMode('under2km')}
+            onClick={() => {
+              setFilterMode("under2km");
+              setTimeout(() => setSearchTrigger((prev) => prev + 1), 10);
+            }}
             style={{
-              padding: '6px 12px',
-              borderRadius: '20px',
-              border: '1px solid #ddd',
-              background: filterMode === 'under2km' ? '#4c6ef5' : 'white',
-              color: filterMode === 'under2km' ? 'white' : '#555',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: filterMode === 'under2km' ? 'bold' : 'normal',
+              padding: "6px 12px",
+              borderRadius: "20px",
+              border: "1px solid #ddd",
+              background: filterMode === "under2km" ? "#4c6ef5" : "white",
+              color: filterMode === "under2km" ? "white" : "#555",
+              cursor: "pointer",
+              fontSize: "13px",
+              fontWeight: filterMode === "under2km" ? "bold" : "normal",
             }}
           >
             2km 이내
           </button>
 
           <button
-            onClick={() => setFilterMode('2to4km')}
+            onClick={() => {
+              setFilterMode("2to4km");
+              setTimeout(() => setSearchTrigger((prev) => prev + 1), 10);
+            }}
             style={{
-              padding: '6px 12px',
-              borderRadius: '20px',
-              border: '1px solid #ddd',
-              background: filterMode === '2to4km' ? '#4c6ef5' : 'white',
-              color: filterMode === '2to4km' ? 'white' : '#555',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: filterMode === '2to4km' ? 'bold' : 'normal',
+              padding: "6px 12px",
+              borderRadius: "20px",
+              border: "1px solid #ddd",
+              background: filterMode === "2to4km" ? "#4c6ef5" : "white",
+              color: filterMode === "2to4km" ? "white" : "#555",
+              cursor: "pointer",
+              fontSize: "13px",
+              fontWeight: filterMode === "2to4km" ? "bold" : "normal",
             }}
           >
             2km ~ 4km
           </button>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+
+        <div style={{ display: "flex", gap: "8px" }}>
           <input
             type="text"
             value={keyword}
@@ -208,39 +268,58 @@ export default function KakaoMap() {
             onKeyDown={handleSearchKeyDown}
             placeholder="검색어 입력 (예: 돈가스)"
             className="mullang-input"
-            style={{ flex: 1, padding: '8px 12px', fontSize: '14px' }}
+            style={{ flex: 1, padding: "8px 12px", fontSize: "14px" }}
           />
-          <button onClick={handleSearchClick} className="mullang-btn" style={{ padding: '8px 16px' }}>검색</button>
+          <button onClick={handleSearchClick} className="mullang-btn" style={{ padding: "8px 16px" }}>
+            검색
+          </button>
         </div>
       </div>
 
       <div
         ref={mapContainerRef}
-        style={{ width: "100%", height: "500px", borderRadius: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+        style={{ width: "100%", height: "500px", borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
       />
 
-      <div className="restaurant-list">
-        <h3 style={{ fontSize: '18px', marginBottom: '10px', color: '#333' }}>
-          {keyword ? `'${keyword}' 검색 결과` :
-            filterMode === 'under2km' ? '학교 주변 맛집 (2km 이내)' : '학교 주변 맛집 (2km ~ 4km)'}
+      <div className="restaurant-list" key={`${filterMode}-${searchTrigger}`}>
+        <h3 style={{ fontSize: "18px", marginBottom: "10px", color: "#333" }}>
+          {keyword
+            ? `'${keyword}' 검색 결과`
+            : filterMode === "under2km"
+              ? "학교 주변 맛집 (2km 이내)"
+              : "학교 주변 맛집 (2km ~ 4km)"}
         </h3>
-        <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #eee', borderRadius: '12px', padding: '10px' }}>
+
+        <div style={{ maxHeight: "400px", overflowY: "auto", border: "1px solid #eee", borderRadius: "12px", padding: "10px" }}>
           {places.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#888', padding: '20px' }}>
-              {isMapLoaded ? "결과가 없습니다." : "로딩 중..."}
+            <p style={{ textAlign: "center", color: "#888", padding: "20px" }}>
+              {searching ? "검색 중..." : "결과가 없습니다."}
             </p>
           ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {places.map((p) => (
-                <li key={p.id} style={{ padding: '12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {places.map((p, idx) => (
+                <li
+                  key={`${p.id ?? "noid"}-${idx}`}
+                  style={{
+                    padding: "12px",
+                    borderBottom: "1px solid #f0f0f0",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
                   <div style={{ flex: 1 }}>
-                    <strong style={{ display: 'block', fontSize: '15px', color: '#333' }}>
-                      <a href={p.place_url} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>{p.place_name}</a>
+                    <strong style={{ display: "block", fontSize: "15px", color: "#333" }}>
+                      <a href={p.place_url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+                        {p.place_name}
+                      </a>
                     </strong>
-                    <span style={{ fontSize: '12px', color: '#888' }}>{p.category_name.split('>').pop()}</span>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#666' }}>{p.road_address_name || p.address_name}</p>
+                    <span style={{ fontSize: "12px", color: "#888" }}>{p.category_name.split(">").pop()}</span>
+                    <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#666" }}>{p.road_address_name || p.address_name}</p>
                   </div>
-                  <span style={{ fontSize: '12px', color: '#d14f92', fontWeight: 'bold', minWidth: '50px', textAlign: 'right' }}>{p.distance}m</span>
+                  <span style={{ fontSize: "12px", color: "#d14f92", fontWeight: "bold", minWidth: "50px", textAlign: "right" }}>
+                    {p.distance}m
+                  </span>
                 </li>
               ))}
             </ul>
