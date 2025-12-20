@@ -31,51 +31,56 @@ function RecommendPage({ menuData, isMenuLoading }) {
         const lunchOptions = menuData.filter(m => m.type === 'lunch');
         const dinnerOptions = menuData.filter(m => m.type === 'dinner');
 
-        let best3 = null;
-        let minDiff3 = Infinity;
-        let best2 = null;
-        let minDiff2 = Infinity;
+        let bestPlan3 = null;
+        let minCalorieDiff3 = Infinity;
+        let bestPlan2 = null;
+        let minCalorieDiff2 = Infinity;
 
+        // 1000번 무작위로 조합을 만들어보고, 가장 목표 칼로리에 가까운 식단을 찾습니다.
         for (let i = 0; i < 1000; i++) {
-            const b = breakfastOptions[Math.floor(Math.random() * breakfastOptions.length)];
-            const l = lunchOptions[Math.floor(Math.random() * lunchOptions.length)];
-            const d = dinnerOptions[Math.floor(Math.random() * dinnerOptions.length)];
+            const breakfast = breakfastOptions[Math.floor(Math.random() * breakfastOptions.length)];
+            const lunch = lunchOptions[Math.floor(Math.random() * lunchOptions.length)];
+            const dinner = dinnerOptions[Math.floor(Math.random() * dinnerOptions.length)];
 
-            if (!l || !d) continue;
+            if (!lunch || !dinner) continue;
 
-            if (b) {
-                const cal3 = b.calories + l.calories + d.calories;
-                const diff3 = Math.abs(targetCalories - cal3);
-                if (diff3 < minDiff3) {
-                    minDiff3 = diff3;
-                    best3 = {
+            // 3끼 조한 (아침 + 점심 + 저녁)
+            if (breakfast) {
+                const currentCalories = breakfast.calories + lunch.calories + dinner.calories;
+                const diff = Math.abs(targetCalories - currentCalories);
+
+                if (diff < minCalorieDiff3) {
+                    minCalorieDiff3 = diff;
+                    bestPlan3 = {
                         totalNutrition: {
-                            calories: cal3,
-                            carbs: b.carbs + l.carbs + d.carbs,
-                            protein: b.protein + l.protein + d.protein,
-                            fat: b.fat + l.fat + d.fat
+                            calories: currentCalories,
+                            carbs: breakfast.carbs + lunch.carbs + dinner.carbs,
+                            protein: breakfast.protein + lunch.protein + dinner.protein,
+                            fat: breakfast.fat + lunch.fat + dinner.fat
                         },
-                        meals: { breakfast: b, lunch: l, dinner: d }
+                        meals: { breakfast, lunch, dinner }
                     };
                 }
             }
 
-            const cal2 = l.calories + d.calories;
-            const diff2 = Math.abs(targetCalories - cal2);
-            if (diff2 < minDiff2) {
-                minDiff2 = diff2;
-                best2 = {
+            // 2끼 조합 (점심 + 저녁)
+            const currentCalories2 = lunch.calories + dinner.calories;
+            const diff2 = Math.abs(targetCalories - currentCalories2);
+
+            if (diff2 < minCalorieDiff2) {
+                minCalorieDiff2 = diff2;
+                bestPlan2 = {
                     totalNutrition: {
-                        calories: cal2,
-                        carbs: l.carbs + d.carbs,
-                        protein: l.protein + d.protein,
-                        fat: l.fat + d.fat
+                        calories: currentCalories2,
+                        carbs: lunch.carbs + dinner.carbs,
+                        protein: lunch.protein + dinner.protein,
+                        fat: lunch.fat + dinner.fat
                     },
-                    meals: { lunch: l, dinner: d }
+                    meals: { lunch, dinner }
                 };
             }
         }
-        return { best3, best2 };
+        return { best3: bestPlan3, best2: bestPlan2 }; // 기존 return 구조 유지 (호환성)
     };
 
     const handleRecommend = async (userId, height, weight) => {
@@ -117,79 +122,70 @@ function RecommendPage({ menuData, isMenuLoading }) {
     return (
         <section className="section">
             <h1 className="section-title">오늘의 추천 식단</h1>
-            <p className="section-sub">키와 몸무게를 입력하면 영양 밸런스를 고려해 최적의 메뉴를 추천해드려요.</p>
+            <p className="section-sub">키와 몸무게를 입력하면 메뉴를 추천해드려요.</p>
 
             <InputForm onSubmit={handleRecommend} isLoading={isLoading} />
 
             {result && (
-                <div className="animate-fade-in">
+                <div>
                     <div className="result-group">
-                        <h2 style={{ marginTop: '40px', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>3끼 추천 (아침+점심+저녁)</h2>
+                        <h2 style={{ fontSize: '18px', marginBottom: '15px' }}>3끼 추천 (아침+점심+저녁)</h2>
 
-                        <div style={{ background: '#f8f9fc', borderRadius: '16px', padding: '20px', margin: '20px 0', border: '1px solid #eef2f8' }}>
+                        <div style={{ padding: '20px', border: '1px solid #eee', marginBottom: '20px' }}>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', textAlign: 'center' }}>
                                 <div>
-                                    <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>하루 권장 목표 (Target)</p>
-                                    <h3 style={{ color: '#333b5c', margin: '0 0 10px 0', fontSize: '18px' }}>{result.targets.calories} kcal</h3>
-                                    <div style={{ fontSize: '13px', color: '#555', display: 'flex', justifyContent: 'center', gap: '10px' }}>
-                                        <span>탄수 {result.targets.carbs}g</span>
-                                        <span>단백 {result.targets.protein}g</span>
-                                        <span>지방 {result.targets.fat}g</span>
+                                    <p style={{ fontSize: '12px', color: '#666' }}>하루 권장 목표 (Target)</p>
+                                    <h3 style={{ fontSize: '18px', margin: '5px 0' }}>{result.targets.calories} kcal</h3>
+                                    <div style={{ fontSize: '13px', color: '#555' }}>
+                                        탄수 {result.targets.carbs}g / 단백 {result.targets.protein}g / 지방 {result.targets.fat}g
                                     </div>
                                 </div>
                                 <div style={{ borderLeft: '1px solid #ddd' }}>
-                                    <p style={{ fontSize: '12px', color: '#d14f92', marginBottom: '8px', fontWeight: 'bold' }}>3끼 총합 (Total)</p>
-                                    <h3 style={{ color: '#d14f92', margin: '0 0 10px 0', fontSize: '18px' }}>{result.plan3.totalNutrition.calories} kcal</h3>
-                                    <div style={{ fontSize: '13px', color: '#333', display: 'flex', justifyContent: 'center', gap: '10px' }}>
-                                        <span>{result.plan3.totalNutrition.carbs}g</span>
-                                        <span>{result.plan3.totalNutrition.protein}g</span>
-                                        <span>{result.plan3.totalNutrition.fat}g</span>
+                                    <p style={{ fontSize: '12px', color: '#666' }}>3끼 총합 (Total)</p>
+                                    <h3 style={{ fontSize: '18px', margin: '5px 0' }}>{result.plan3.totalNutrition.calories} kcal</h3>
+                                    <div style={{ fontSize: '13px', color: '#555' }}>
+                                        {result.plan3.totalNutrition.carbs}g / {result.plan3.totalNutrition.protein}g / {result.plan3.totalNutrition.fat}g
                                     </div>
                                 </div>
                             </div>
                         </div>
 
                         <div className="meal-cards">
-                            <MealCard title="든든한 아침" menu={result.plan3.meals.breakfast} />
-                            <MealCard title="활기찬 점심" menu={result.plan3.meals.lunch} />
-                            <MealCard title="가벼운 저녁" menu={result.plan3.meals.dinner} />
+                            <MealCard title="아침" menu={result.plan3.meals.breakfast} />
+                            <MealCard title="점심" menu={result.plan3.meals.lunch} />
+                            <MealCard title="저녁" menu={result.plan3.meals.dinner} />
                         </div>
                     </div>
 
-                    <div className="result-group" style={{ marginTop: '60px' }}>
-                        <h2 style={{ borderBottom: '2px solid #eee', paddingBottom: '10px' }}>2끼 추천 (점심+저녁)</h2>
-                        <p style={{ color: '#888', fontSize: '14px', marginBottom: '20px' }}>아침을 거르시는 분들을 위한 추천 조합입니다.</p>
+                    <div className="result-group" style={{ marginTop: '40px' }}>
+                        <h2 style={{ fontSize: '18px', marginBottom: '15px' }}>2끼 추천 (점심+저녁)</h2>
 
-                        <div style={{ background: '#fff4f4', borderRadius: '16px', padding: '20px', margin: '20px 0', border: '1px solid #ffebeb' }}>
+                        <div style={{ padding: '20px', border: '1px solid #eee', marginBottom: '20px' }}>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', textAlign: 'center' }}>
                                 <div>
-                                    <p style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>하루 권장 목표 (Target)</p>
-                                    <h3 style={{ color: '#333b5c', margin: '0 0 10px 0', fontSize: '18px' }}>{result.targets.calories} kcal</h3>
-                                    <div style={{ fontSize: '13px', color: '#555', display: 'flex', justifyContent: 'center', gap: '10px' }}>
-                                        <span>탄수 {result.targets.carbs}g</span>
-                                        <span>단백 {result.targets.protein}g</span>
-                                        <span>지방 {result.targets.fat}g</span>
+                                    <p style={{ fontSize: '12px', color: '#666' }}>하루 권장 목표 (Target)</p>
+                                    <h3 style={{ fontSize: '18px', margin: '5px 0' }}>{result.targets.calories} kcal</h3>
+                                    <div style={{ fontSize: '13px', color: '#555' }}>
+                                        탄수 {result.targets.carbs}g / 단백 {result.targets.protein}g / 지방 {result.targets.fat}g
                                     </div>
                                 </div>
-                                <div style={{ borderLeft: '1px solid #ffccd5' }}>
-                                    <p style={{ fontSize: '12px', color: '#ff6b6b', marginBottom: '8px', fontWeight: 'bold' }}>2끼 총합 (Total)</p>
-                                    <h3 style={{ color: '#ff6b6b', margin: '0 0 10px 0', fontSize: '18px' }}>{result.plan2.totalNutrition.calories} kcal</h3>
-                                    <div style={{ fontSize: '13px', color: '#d63030', display: 'flex', justifyContent: 'center', gap: '10px' }}>
-                                        <span>{result.plan2.totalNutrition.carbs}g</span>
-                                        <span>{result.plan2.totalNutrition.protein}g</span>
-                                        <span>{result.plan2.totalNutrition.fat}g</span>
+                                <div style={{ borderLeft: '1px solid #ddd' }}>
+                                    <p style={{ fontSize: '12px', color: '#666' }}>2끼 총합 (Total)</p>
+                                    <h3 style={{ fontSize: '18px', margin: '5px 0' }}>{result.plan2.totalNutrition.calories} kcal</h3>
+                                    <div style={{ fontSize: '13px', color: '#555' }}>
+                                        {result.plan2.totalNutrition.carbs}g / {result.plan2.totalNutrition.protein}g / {result.plan2.totalNutrition.fat}g
                                     </div>
                                 </div>
                             </div>
                         </div>
 
                         <div className="meal-cards">
-                            <div className="meal-card placeholder" style={{ opacity: 0.5, background: '#f0f0f0' }}>
-                                <h3>아침 패스</h3>
-                                <p>섭취 없음</p>
+                            <div className="meal-card" style={{ background: '#f9f9f9', color: '#888' }}>
+                                <h3>아침 없음</h3>
+                                <p>패스</p>
                             </div>
-                            <MealCard title="푸짐한 점심" menu={result.plan2.meals.lunch} />
-                            <MealCard title="푸짐한 저녁" menu={result.plan2.meals.dinner} />
+                            <MealCard title="점심" menu={result.plan2.meals.lunch} />
+                            <MealCard title="저녁" menu={result.plan2.meals.dinner} />
                         </div>
                     </div>
                 </div>
@@ -197,7 +193,7 @@ function RecommendPage({ menuData, isMenuLoading }) {
 
             {!result && !isLoading && (
                 <div style={{ textAlign: 'center', color: '#8892b0', padding: '40px' }}>
-                    {isMenuLoading ? "메뉴 데이터를 불러오는 중입니다..." : "정보를 입력하고 추천 버튼을 눌러보세요!"}
+                    {isMenuLoading ? "메뉴 데이터를 불러오는 중..." : "정보를 입력하세요"}
                 </div>
             )}
         </section>

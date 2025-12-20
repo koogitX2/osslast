@@ -4,7 +4,7 @@ function MealCard({ title, menu }) {
     return (
         <div className="meal-card recommend-card">
             <h3>{title}</h3>
-            <p className="recommend-menu-line" style={{ fontWeight: 'bold', color: '#333' }}>
+            <p className="recommend-menu-line" style={{ fontWeight: 'bold', color: '#2e2c2cff' }}>
                 {menu.place} : {menu.name}
             </p>
             <ul className="nutri-list">
